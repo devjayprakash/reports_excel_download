@@ -18,23 +18,23 @@ export async function POST(req, res) {
         FORMAT(ta.entry_date, 'HH:mm:ss') AS entry_time,
         ta.remarks,
         ta.status,
-        ur.role,
-        du.user_name,
+        COALESCE(ur.role, '') AS role,  -- Assign 'None' if user role is null
+        COALESCE(du.user_name, '') AS user_name,  -- Assign 'None' if entry_by = 0
         ROW_NUMBER() OVER (
             PARTITION BY dz.zone, daA.area, dl.locality, dal.code, CONVERT(DATE, ta.entry_date)
             ORDER BY ta.entry_date
         ) AS rn
     FROM 
         tata_asset_mgmt.jusco_asset_mgmt.txn_activity AS ta
+    LEFT JOIN 
+        tata_asset_mgmt.jusco_asset_mgmt.data_users AS du
+        ON ta.entry_by = du.id
+    LEFT JOIN  -- Use LEFT JOIN to handle cases where user role might be null
+        tata_asset_mgmt.jusco_asset_mgmt.meta_user_role AS ur
+        ON du.user_role = ur.id
     JOIN 
         tata_asset_mgmt.jusco_asset_mgmt.data_asset_list AS dal 
         ON ta.asset_id = dal.id
-    JOIN
-        tata_asset_mgmt.jusco_asset_mgmt.data_users AS du
-        ON ta.entry_by = du.id
-    JOIN
-        tata_asset_mgmt.jusco_asset_mgmt.meta_user_role AS ur
-        ON du.user_role = ur.id
     JOIN 
         tata_asset_mgmt.jusco_asset_mgmt.data_locality AS dl 
         ON dal.locality_id = dl.id
@@ -72,36 +72,29 @@ export async function POST(req, res) {
             AND f1.locality = f2.locality 
             AND f1.code = f2.code 
             AND f1.entry_date = f2.entry_date
-            AND DATEDIFF(MINUTE, f2.entry_time, f1.entry_time) BETWEEN 1 AND 180
+            AND DATEDIFF(MINUTE, f2.entry_time, f1.entry_time) BETWEEN 1 AND ${timeInterval}
             AND f1.rn > f2.rn
     )
 )
 SELECT
-    dt.zone,
-    dt.area,
-    dt.locality,
+    MAX(dt.zone) AS zone,
+    MAX(dt.area) AS area,
+    MAX(dt.locality) AS locality,
     dt.code,
-    dt.name,
+    MAX(dt.name) AS name,
     dt.entry_date,
     STRING_AGG(dt.entry_time, ', ') AS entry_times,  -- Concatenates times separated by commas
-    dt.remarks,
-    dt.status,
-    dt.role,
+    MAX(dt.remarks) AS remarks,
+    MAX(dt.status) AS status,
+    MAX(dt.role) AS role,
     STRING_AGG(dt.user_name, ' / ') AS user_names  -- Concatenates user names separated by slashes
 FROM 
     DedupedTimes AS dt
 GROUP BY 
-    dt.zone,
-    dt.area,
-    dt.locality,
     dt.code,
-    dt.name,
-    dt.entry_date,
-    dt.remarks,
-    dt.status,
-    dt.role
+    dt.entry_date
 ORDER BY 
-    dt.entry_date, dt.code;  -- Order by the aggregated date
+    dt.entry_date, dt.code;
 `);
     return new Response(
       JSON.stringify(
